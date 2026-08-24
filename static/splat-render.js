@@ -554,8 +554,11 @@ function createWorker(self) {
         let depthInv = (256 * 256 - 1) / (maxDepth - minDepth);
         let counts0 = new Uint32Array(256 * 256);
         for (let i = 0; i < vertexCount; i++) {
-            sizeList[i] = ((sizeList[i] - minDepth) * depthInv) | 0;
-            counts0[sizeList[i]]++;
+            let b = ((sizeList[i] - minDepth) * depthInv) | 0;
+            if (b < 0) b = 0;
+            if (b > 65535) b = 65535;
+            sizeList[i] = b;
+            counts0[b]++;
         }
         let starts0 = new Uint32Array(256 * 256);
         for (let i = 1; i < 256 * 256; i++)
@@ -874,9 +877,13 @@ async function main() {
 
     const rowLength = 3 * 4 + 3 * 4 + 4 + 4;
     const reader = req.body.getReader();
-    let splatData = new Uint8Array(req.headers.get("content-length"));
+    // GitHub Pages 等 CDN 会 gzip 压缩响应：content-length 是压缩后尺寸，
+    // 浏览器解压后的真实字节数更大，预分配不能只信它，读取时动态扩容
+    let splatData = new Uint8Array(
+        Math.max(parseInt(req.headers.get("content-length")) || 0, 1 << 20),
+    );
 
-    // 默认按设备像素比全分辨率渲染（上限 2x），粒子更细腻；
+    // 高斯光栅化本身亚像素平滑，默认按设备像素比全分辨率渲染（上限 2x）；
     // 弱机可加 ?soft=1 回退低分辨率，?res=1.5 可手动限制像素比上限
     const downsample = params.has("soft")
         ? (splatData.length / rowLength > 500000 ? 1 : 1 / devicePixelRatio)
@@ -1617,6 +1624,13 @@ async function main() {
         const { done, value } = await reader.read();
         if (done || stopLoading) break;
 
+        if (bytesRead + value.length > splatData.length) {
+            const grown = new Uint8Array(
+                Math.max(splatData.length * 2, bytesRead + value.length),
+            );
+            grown.set(splatData.subarray(0, bytesRead));
+            splatData = grown;
+        }
         splatData.set(value, bytesRead);
         bytesRead += value.length;
 
@@ -1640,6 +1654,10 @@ async function main() {
         }
     }
     if (!stopLoading) {
+        // 扩容过的缓冲区裁回真实长度，保证 total 与纹理尺寸准确
+        if (bytesRead < splatData.length) {
+            splatData = new Uint8Array(splatData.buffer.slice(0, bytesRead));
+        }
         if (isPly(splatData)) {
             // ply file magic header means it should be handled differently
             worker.postMessage({ ply: splatData.buffer, save: false });
