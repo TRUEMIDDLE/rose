@@ -1525,7 +1525,7 @@ async function main() {
         if (isNaN(currentCameraIndex)) {
             camid.innerText = "";
         }
-        // 七夕定制：暴露给外壳页面的状态与运镜控制
+        // 生日定制：暴露给外壳页面的状态与运镜控制
         window.__splat = {
             loaded: vertexCount > 0,
             total: Math.floor(splatData.length / rowLength),
