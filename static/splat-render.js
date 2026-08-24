@@ -510,9 +510,9 @@ function createWorker(self) {
                 M[2] * M[2] + M[5] * M[5] + M[8] * M[8],
             ];
 
-            texdata[8 * i + 4] = packHalf2x16(4 * sigma[0], 4 * sigma[1]);
-            texdata[8 * i + 5] = packHalf2x16(4 * sigma[2], 4 * sigma[3]);
-            texdata[8 * i + 6] = packHalf2x16(4 * sigma[4], 4 * sigma[5]);
+            texdata[8 * i + 4] = packHalf2x16(3.0 * sigma[0], 3.0 * sigma[1]);
+            texdata[8 * i + 5] = packHalf2x16(3.0 * sigma[2], 3.0 * sigma[3]);
+            texdata[8 * i + 6] = packHalf2x16(3.0 * sigma[4], 3.0 * sigma[5]);
         }
 
         self.postMessage({ texdata, texwidth, texheight }, [texdata.buffer]);
@@ -762,6 +762,9 @@ uniform highp usampler2D u_texture;
 uniform mat4 projection, view;
 uniform vec2 focal;
 uniform vec2 viewport;
+uniform float u_sat;
+uniform float u_tint_r;
+uniform float u_tint_b;
 
 in vec2 position;
 in int index;
@@ -821,13 +824,22 @@ precision highp float;
 in vec4 vColor;
 in vec2 vPosition;
 
+uniform float u_sat;
+uniform float u_tint_r;
+uniform float u_tint_b;
+
 out vec4 fragColor;
 
 void main () {
     float A = -dot(vPosition, vPosition);
     if (A < -4.0) discard;
     float B = exp(A) * vColor.a;
-    fragColor = vec4(B * vColor.rgb, B);
+    vec3 c = vColor.rgb * 1.04;
+    float luma = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(vec3(luma), c, u_sat);
+    c.r *= u_tint_r;
+    c.b *= u_tint_b;
+    fragColor = vec4(B * c, B);
 }
 
 `.trim();
@@ -864,8 +876,11 @@ async function main() {
     const reader = req.body.getReader();
     let splatData = new Uint8Array(req.headers.get("content-length"));
 
-    const downsample =
-        splatData.length / rowLength > 500000 ? 1 : 1 / devicePixelRatio;
+    // 默认按设备像素比全分辨率渲染（上限 2x），粒子更细腻；
+    // 弱机可加 ?soft=1 回退低分辨率，?res=1.5 可手动限制像素比上限
+    const downsample = params.has("soft")
+        ? (splatData.length / rowLength > 500000 ? 1 : 1 / devicePixelRatio)
+        : 1 / Math.min(devicePixelRatio, parseFloat(params.get("res")) || 2);
     console.log(splatData.length / rowLength, downsample);
 
     const worker = new Worker(
@@ -923,6 +938,11 @@ async function main() {
     const u_viewport = gl.getUniformLocation(program, "viewport");
     const u_focal = gl.getUniformLocation(program, "focal");
     const u_view = gl.getUniformLocation(program, "view");
+    // 色彩精修：?sat= 饱和度 ?tint= 暖色偏移（红升蓝降）
+    gl.uniform1f(gl.getUniformLocation(program, "u_sat"), parseFloat(params.get("sat")) || 1.12);
+    const tint = parseFloat(params.get("tint")) || 0.03;
+    gl.uniform1f(gl.getUniformLocation(program, "u_tint_r"), 1 + tint);
+    gl.uniform1f(gl.getUniformLocation(program, "u_tint_b"), 1 - tint);
 
     // positions
     const triangleVertices = new Float32Array([-2, -2, 2, -2, 2, 2, -2, 2]);
