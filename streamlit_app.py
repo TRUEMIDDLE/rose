@@ -95,7 +95,7 @@ def page_html(name: str, fragment: str) -> str:
 
 def main() -> None:
     st.set_page_config(
-        page_title="生日快乐",
+        page_title="平安喜乐",
         page_icon="🌹",
         layout="wide",
         initial_sidebar_state="collapsed",
